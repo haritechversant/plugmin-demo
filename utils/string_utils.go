@@ -23,3 +23,11 @@ func Capitalize(str string) string {
 	runes[0] = unicode.ToUpper(runes[0])
 	return string(runes)
 }
+
+// capitalizeFirstLetter capitalizes the first letter of a string.
+func CapitalizeFirstLetter(s string) string {
+	if len(s) == 0 {
+		return s
+	}
+	return strings.ToUpper(s[:1]) + s[1:]
+}
