@@ -37,7 +37,6 @@ func HandleRequest(method, tableName, dbType, requestBody string, config db.DBCo
 		return
 	}
 
-	// Ensure the model is used correctly for auto-migration
 	if err := dbConn.Table(tableName).AutoMigrate(dynamicStruct.Interface()); err != nil {
 		fmt.Println("Error auto-migrating schema:", err)
 		return
@@ -118,7 +117,7 @@ func main() {
 	// 	"id": 10,
 	// }
 
-	method := "POST"
+	method := "GET"
 
 	HandleRequest(method, tableName, dbType, requestBody, dbConfig, queryParams)
 }

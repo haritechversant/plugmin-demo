@@ -34,19 +34,6 @@ type MySQLConfig struct {
 	Port     int
 }
 
-// func (m *MySQLConfig) GetDSN() string {
-// 	// Escape special characters in the password
-// 	escapedPassword := url.QueryEscape(m.Password)
-
-// 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s",
-// 		m.User, escapedPassword, m.Host, m.Port, m.DbName)
-
-// 	// Print the DSN for debugging
-// 	fmt.Println("DSN:", dsn)
-
-// 	return dsn
-// }
-
 func (m *MySQLConfig) GetDSN() string {
 	dsn := fmt.Sprintf("%s:%s@tcp(%s:%d)/%s?charset=utf8&parseTime=True&loc=Local",
 		m.User, m.Password, m.Host, m.Port, m.DbName)
