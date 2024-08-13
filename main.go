@@ -3,122 +3,149 @@ package main
 import (
 	"encoding/json"
 	"fmt"
-	"orm-sample/db"
-	"orm-sample/utils"
+	"log"
+	"reflect"
+	"strings"
+
+	"gorm.io/driver/postgres"
+	"gorm.io/gorm"
 )
 
-func HandleRequest(method, tableName, dbType, requestBody string, config db.DBConfig, queryParams map[string]interface{}) {
+func main() {
+
+	dsn := "host=localhost user=postgres password=postgres dbname=postgres port=5432 sslmode=disable"
+	db, err := gorm.Open(postgres.New(postgres.Config{
+		DSN:                  dsn,
+		PreferSimpleProtocol: true,
+	}), &gorm.Config{})
+	if err != nil {
+		log.Fatalf("failed to connect to the database: %v", err)
+
+	}
+
+	jsonData := getSampleJSONData()
 	var data map[string]interface{}
-	err := json.Unmarshal([]byte(requestBody), &data)
-	if err != nil {
-		fmt.Println("Error unmarshalling request body:", err)
-		return
+	if err := json.Unmarshal(jsonData, &data); err != nil {
+		log.Fatalf("failed to unmarshal JSON data: %v", err)
 	}
+	ProcessAndInsertData(db, data)
+}
 
-	if method == "POST" && (requestBody == "" || len(data) == 0) {
-		fmt.Println("Error: Request body cannot be empty for POST operation.")
-		return
-	}
-
-	if method == "PATCH" {
-		id, ok := queryParams["id"]
-		if !ok || id == "" {
-			fmt.Println("Error: ID must be provided for PATCH operation.")
-			return
+func getSampleJSONData() []byte {
+	return []byte(`{
+		"user": {
+			"columnVals": {
+				"id": "11212",
+				"name": "rhye",
+				"email": "mailto:sachin@ggmail.com"
+			}
+		},
+		"address_details": {
+			"columnVals": {
+				"address": "Techversant",
+				"city": "Tvm"
+			},
+			"ReferenceKey": {
+				"user_id": "$user.id"
+			}
+		},
+		"department": {
+			"columnVals": {
+				"id":"2333122",
+				"name": "Computer"
+			},
+			"ReferenceKey": {
+				"user_id": "$user.id"
+			}
+		},
+		"location": {
+			"columnVals": {
+				"name": "America"
+			},
+			"ReferenceKey": {
+				"user_id": "$user.id",
+				"department_id": "$department.id"
+			}
 		}
-	}
+	}`)
+}
 
-	dynamicStruct := utils.CreateDynamicStruct(data)
-	utils.PopulateStruct(dynamicStruct, data)
+func ProcessAndInsertData(db *gorm.DB, data map[string]interface{}) {
+	primaryKeyMap := make(map[string]string)
 
-	dbConn, err := db.InitDB(config, dbType)
-	if err != nil {
-		fmt.Println("Error initializing database:", err)
-		return
-	}
-
-	if err := dbConn.Table(tableName).AutoMigrate(dynamicStruct.Interface()); err != nil {
-		fmt.Println("Error auto-migrating schema:", err)
-		return
-	}
-
-	switch method {
-	case "POST":
-		if err := dbConn.Table(tableName).Create(dynamicStruct.Interface()).Error; err != nil {
-			fmt.Println("Error inserting data:", err)
-		} else {
-			fmt.Println("Operation success")
-		}
-	case "GET":
-		var results []map[string]interface{}
-		fmt.Printf("Query parameters: %+v\n", queryParams)
-		query := dbConn.Table(tableName)
-		if len(queryParams) > 0 {
-			query = query.Where(queryParams)
+	for tableName, tableData := range data {
+		tableMap, ok := tableData.(map[string]interface{})
+		if !ok {
+			log.Printf("Invalid data format for table %s", tableName)
+			continue
 		}
 
-		if err := query.Find(&results).Error; err != nil {
-			fmt.Println("Error retrieving data:", err)
-		} else if len(results) == 0 {
-			fmt.Println("No data found matching query parameters.")
-		} else {
-			resultJSON, _ := json.Marshal(results)
-			fmt.Println("Retrieved data:", string(resultJSON))
+		columnVals, _ := tableMap["columnVals"].(map[string]interface{})
+
+		ResolveReferences(columnVals, tableMap, primaryKeyMap)
+
+		fmt.Printf("Processed columnVals for table %s: %+v\n", tableName, columnVals)
+
+		structValue := createStructFromMap(columnVals)
+		if err := db.Table(tableName).Create(structValue.Addr().Interface()).Error; err != nil {
+			log.Printf("Failed to insert into table %s: %v", tableName, err)
+			continue
 		}
-	case "PATCH":
-		id := queryParams["id"]
-		if err := dbConn.Table(tableName).Where("id = ?", id).Updates(dynamicStruct.Interface()).Error; err != nil {
-			fmt.Println("Error updating data:", err)
-		} else {
-			fmt.Println("Operation success")
+
+		if id, ok := columnVals["id"]; ok {
+			primaryKeyMap[tableName+".id"] = id.(string)
 		}
-	default:
-		fmt.Println("Unsupported method:", method)
 	}
 }
 
-func main() {
-	dbType := "postgres"
-
-	dbConfig := &db.PostgresConfig{
-		Host:     "10.1.0.195",
-		User:     "tuneverse_user",
-		Password: "S3cretPassWord",
-		DbName:   "plugmin",
-		Port:     5432,
-		SSLMode:  "disable",
+func ResolveReferences(columnVals map[string]interface{}, tableMap map[string]interface{}, primaryKeyMap map[string]string) {
+	refKeysMap, ok := tableMap["ReferenceKey"].(map[string]interface{})
+	if !ok {
+		return
 	}
 
-	// dbType := "mysql"
+	for field, ref := range refKeysMap {
+		refStr, ok := ref.(string)
+		if !ok {
+			continue
+		}
 
-	// dbConfig := &db.MySQLConfig{
-	// 	Host:     "localhost",
-	// 	User:     "admin",
-	// 	Password: "Str0ngP@ssw0rd!",
-	// 	DbName:   "plugmin",
-	// 	Port:     3306,
-	// }
+		refParts := strings.SplitN(refStr[1:], ".", 2)
+		if len(refParts) == 2 {
+			key := refParts[0] + "." + refParts[1]
+			if val, exists := primaryKeyMap[key]; exists {
+				columnVals[field] = val
+			} else {
+				log.Printf("Reference key %s not found in primaryKeyMap", key)
+			}
+		}
+	}
+}
 
-	tableName := "user"
+func createStructFromMap(fields map[string]interface{}) reflect.Value {
+	structFields := make([]reflect.StructField, 0, len(fields))
 
-	queryParams := map[string]interface{}{}
+	for fieldName, fieldValue := range fields {
+		structFields = append(structFields, reflect.StructField{
+			Name: capitalize(fieldName),
+			Type: reflect.TypeOf(fieldValue),
+			Tag:  reflect.StructTag(fmt.Sprintf(`json:"%s" gorm:"column:%s"`, fieldName, fieldName)),
+		})
+	}
 
-	// requestBody := `{
+	structType := reflect.StructOf(structFields)
+	structInstance := reflect.New(structType).Elem()
 
-	// }`
+	for fieldName, fieldValue := range fields {
+		structInstance.FieldByName(capitalize(fieldName)).Set(reflect.ValueOf(fieldValue))
+	}
 
-	requestBody := `{
-	    "name":"Sagar P",
-		"age": 30,
-		"type":"free_user",
-		"email": "sagar@example.com"
-	}`
+	return structInstance
+}
 
-	// queryParams := map[string]interface{}{
-	// 	"id": 10,
-	// }
-
-	method := "GET"
-
-	HandleRequest(method, tableName, dbType, requestBody, dbConfig, queryParams)
+func capitalize(str string) string {
+	if str == "" {
+		return str
+	}
+	return strings.ToUpper(str[:1]) + str[1:]
 }
