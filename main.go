@@ -192,15 +192,14 @@ func main() {
 	requestBody := `{
 		"user": {
 			"columnVals": {
-			  
 				"name": "hhhaaarrriii",
-				"email": "amirtsha2@ggmail.com"
+				"email": "amiruutsha2@ggmail.com"
 			}
 		},
 		"address_details": {
 			"columnVals": {
 				"address": "newaaaaaa",
-				"user_id": 16,
+				"user_id": "user.id",
 				"city": "aaaaabc"
 			},
 			"referenceKey": {
@@ -209,7 +208,7 @@ func main() {
 		}
 	}`
 
-	method := "PATCH"
+	method := "POST"
 	queryParams := make(map[string]interface{})
 
 	HandleRequest(method, dbType, requestBody, dbConfig, queryParams)
