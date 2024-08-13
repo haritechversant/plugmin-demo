@@ -3,80 +3,80 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"log"
 	"orm-sample/db"
-	"orm-sample/utils"
+	"strings"
 )
 
-func HandleRequest(method, tableName, dbType, requestBody string, config db.DBConfig, queryParams map[string]interface{}) {
-	var data map[string]interface{}
-	err := json.Unmarshal([]byte(requestBody), &data)
-	if err != nil {
-		fmt.Println("Error unmarshalling request body:", err)
-		return
-	}
-
-	if method == "POST" && (requestBody == "" || len(data) == 0) {
-		fmt.Println("Error: Request body cannot be empty for POST operation.")
-		return
-	}
-
-	if method == "PATCH" {
-		id, ok := queryParams["id"]
-		if !ok || id == "" {
-			fmt.Println("Error: ID must be provided for PATCH operation.")
-			return
-		}
-	}
-
-	dynamicStruct := utils.CreateDynamicStruct(data)
-	utils.PopulateStruct(dynamicStruct, data)
-
-	dbConn, err := db.InitDB(config, dbType)
-	if err != nil {
-		fmt.Println("Error initializing database:", err)
-		return
-	}
-
-	if err := dbConn.Table(tableName).AutoMigrate(dynamicStruct.Interface()); err != nil {
-		fmt.Println("Error auto-migrating schema:", err)
-		return
-	}
-
-	switch method {
-	case "POST":
-		if err := dbConn.Table(tableName).Create(dynamicStruct.Interface()).Error; err != nil {
-			fmt.Println("Error inserting data:", err)
-		} else {
-			fmt.Println("Operation success")
-		}
-	case "GET":
-		var results []map[string]interface{}
-		fmt.Printf("Query parameters: %+v\n", queryParams)
-		query := dbConn.Table(tableName)
-		if len(queryParams) > 0 {
-			query = query.Where(queryParams)
-		}
-
-		if err := query.Find(&results).Error; err != nil {
-			fmt.Println("Error retrieving data:", err)
-		} else if len(results) == 0 {
-			fmt.Println("No data found matching query parameters.")
-		} else {
-			resultJSON, _ := json.Marshal(results)
-			fmt.Println("Retrieved data:", string(resultJSON))
-		}
-	case "PATCH":
-		id := queryParams["id"]
-		if err := dbConn.Table(tableName).Where("id = ?", id).Updates(dynamicStruct.Interface()).Error; err != nil {
-			fmt.Println("Error updating data:", err)
-		} else {
-			fmt.Println("Operation success")
-		}
-	default:
-		fmt.Println("Unsupported method:", method)
-	}
+// QuoteIdentifier quotes a PostgreSQL identifier (table or column name)
+func QuoteIdentifier(identifier string) string {
+	return fmt.Sprintf(`"%s"`, identifier)
 }
 
+func HandleRequest(method, dbType, requestBody string, dbConfig db.DBConfig, queryParams map[string]interface{}) {
+	if method != "POST" {
+		log.Fatalf("Unsupported method: %s", method)
+	}
+
+	// Initialize the database connection
+	db, err := db.InitDB(dbConfig, dbType)
+	if err != nil {
+		log.Fatalf("Error initializing database: %v", err)
+	}
+
+	var requestData map[string]map[string]interface{}
+	err = json.Unmarshal([]byte(requestBody), &requestData)
+	if err != nil {
+		log.Fatalf("Error parsing request body: %v", err)
+	}
+
+	// To store IDs of inserted rows for reference keys
+	ids := make(map[string]interface{})
+
+	for tableName, data := range requestData {
+		columnVals, ok := data["columnVals"].(map[string]interface{})
+		if !ok {
+			log.Fatalf("Invalid columnVals for table: %s", tableName)
+		}
+
+		// Handle reference keys
+		refKeys, _ := data["referenceKey"].(map[string]interface{})
+		for key, value := range refKeys {
+			if valueStr, ok := value.(string); ok && strings.HasPrefix(valueStr, "$") {
+				// Extract value from previously inserted rows
+				refColumn := strings.TrimPrefix(valueStr, "$")
+				if refVal, found := ids[refColumn]; found {
+					columnVals[key] = refVal
+				} else {
+					log.Fatalf("Reference key %s not found in columnVals", refColumn)
+				}
+			}
+		}
+
+		// Generate the SQL INSERT statement with quoted identifiers
+		var columns []string
+		var values []interface{}
+		for col, val := range columnVals {
+			columns = append(columns, QuoteIdentifier(col))
+			values = append(values, val)
+		}
+
+		sqlStatement := fmt.Sprintf("INSERT INTO %s (%s) VALUES (%s) RETURNING id",
+			QuoteIdentifier(tableName),
+			strings.Join(columns, ", "),
+			strings.Repeat("?,", len(values)-1)+"?")
+
+		var insertedID int64
+		err := db.Raw(sqlStatement, values...).Scan(&insertedID).Error
+		if err != nil {
+			log.Fatalf("Error executing query for table %s: %v", tableName, err)
+		}
+		fmt.Printf("Successfully inserted data into table: %s with ID %d\n", tableName, insertedID)
+
+		// Store the inserted ID for use in reference keys
+		ids[tableName+".id"] = insertedID
+	}
+}
 func main() {
 	dbType := "postgres"
 
@@ -99,26 +99,27 @@ func main() {
 	// 	Port:     3306,
 	// }
 
-	tableName := "user"
-
-	queryParams := map[string]interface{}{}
-
-	// requestBody := `{
-
-	// }`
-
 	requestBody := `{
-	    "name":"Sagar P",
-		"age": 30,
-		"type":"free_user",
-		"email": "sagar@example.com"
+		"user": {
+			"columnVals": {
+				"name": "Aiswarya",
+				"email": "annmit@ggmail.com"
+			}
+		},
+		"address_details": {
+			"columnVals": {
+				"address": "thiruvathira",
+				"user_id": "user.id",
+				"city": "abc"
+			},
+			"referenceKey": {
+				"user_id": "$user.id"
+			}
+		}
 	}`
 
-	// queryParams := map[string]interface{}{
-	// 	"id": 10,
-	// }
+	method := "POST"
+	queryParams := make(map[string]interface{})
 
-	method := "GET"
-
-	HandleRequest(method, tableName, dbType, requestBody, dbConfig, queryParams)
+	HandleRequest(method, dbType, requestBody, dbConfig, queryParams)
 }
