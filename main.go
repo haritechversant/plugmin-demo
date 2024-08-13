@@ -78,25 +78,26 @@ func HandleRequest(method, tableName, dbType, requestBody string, config db.DBCo
 }
 
 func main() {
-	dbType := "mysql"
-	// dbType := "postgres"
+	dbType := "postgres"
 
-	// dbConfig := &db.PostgresConfig{
-	// 	Host:     "10.1.0.195",
-	// 	User:     "tuneverse_user",
-	// 	Password: "S3cretPassWord",
-	// 	DbName:   "plugmin",
-	// 	Port:     5432,
-	// 	SSLMode:  "disable",
-	// }
-
-	dbConfig := &db.MySQLConfig{
-		Host:     "localhost",
-		User:     "admin",
-		Password: "Str0ngP@ssw0rd!",
+	dbConfig := &db.PostgresConfig{
+		Host:     "10.1.0.195",
+		User:     "tuneverse_user",
+		Password: "S3cretPassWord",
 		DbName:   "plugmin",
-		Port:     3306,
+		Port:     5432,
+		SSLMode:  "disable",
 	}
+
+	// dbType := "mysql"
+
+	// dbConfig := &db.MySQLConfig{
+	// 	Host:     "localhost",
+	// 	User:     "admin",
+	// 	Password: "Str0ngP@ssw0rd!",
+	// 	DbName:   "plugmin",
+	// 	Port:     3306,
+	// }
 
 	tableName := "user"
 
